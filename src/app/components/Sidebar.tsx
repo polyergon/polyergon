@@ -2,6 +2,7 @@
 import { withOrg } from '@/lib/activeOrg'
 import { useState, useEffect, useRef } from 'react'
 import type { SessionSummary } from '@/lib/sessionStore'
+import type { SessionFolders } from '@/lib/sessionFolderStore'
 import type { LiveSessionInfo, SessionStatus } from '@/hooks/useTerminal'
 import type { PrSessionEntry, PrStatus } from '@/lib/prTypes'
 import type { PrInbox, InboxPr } from '@/lib/ghInbox'
@@ -294,7 +295,10 @@ function getLiveSessionTitle(s: LiveSessionInfo, sessionNames: Record<string, st
     ?? s.cwd
 }
 
-function LiveSessionCard({ s, isActive, sessionNames, historySessions, cost, contextTokens, compactAt, pipeline, onAutomate, onRenameLive, onAttachLive, onKillLive, onRemoveWorktree, onReview, onDeleteLive, onResume, onCompact, onSetRemote, onRename }: {
+function LiveSessionCard({ s, isActive, sessionNames, historySessions, cost, contextTokens, compactAt, pipeline, onAutomate, onRenameLive, onAttachLive, onKillLive, onRemoveWorktree, onReview, onDeleteLive, onResume, onCompact, onSetRemote, onRename, folders, folderId, onMoveToFolder }: {
+  folders?: { id: string; name: string }[]
+  folderId?: string | null
+  onMoveToFolder?: (id: string, folderId: string | null) => void
   pipeline: Pipeline | null
   onAutomate: (id: string) => void
   onRenameLive: (id: string, name: string) => void
@@ -550,6 +554,19 @@ function LiveSessionCard({ s, isActive, sessionNames, historySessions, cost, con
               className="text-[11px] text-blue-500 hover:text-blue-300"
             >Resume</button>
           )}
+          {onMoveToFolder && (
+            <select
+              value={folderId ?? ''}
+              onClick={e => e.stopPropagation()}
+              onChange={e => onMoveToFolder(s.id, e.target.value || null)}
+              className="text-[11px] bg-transparent text-gray-500 hover:text-gray-200 outline-none cursor-pointer max-w-[7rem] truncate"
+              title="Put this session in a folder"
+            >
+              <option value="" className="bg-gray-900">{folderId ? 'No folder' : '📁 Folder…'}</option>
+              {(folders ?? []).map(f => <option key={f.id} value={f.id} className="bg-gray-900">📁 {f.name}</option>)}
+              <option value="__new" className="bg-gray-900">＋ New folder</option>
+            </select>
+          )}
           <button
             onClick={e => { e.stopPropagation(); onKillLive(s.id) }}
             className="text-[11px] text-gray-500 hover:text-red-400 ml-auto"
@@ -674,6 +691,37 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
   const [sessionGroupOverrides, setSessionGroupOverrides] = useLocalStorage<Record<string, string>>('claude-session-group-overrides', {})
   const [liveOrder, setLiveOrder] = useLocalStorage<string[]>('claude-live-order', [])
   const [liveSort, setLiveSort] = useLocalStorage<'custom' | 'recent' | 'name'>('claude-live-sort', 'custom')
+  // Folders for live sessions, stored on the server so every browser sees them
+  const [sf, setSf] = useState<SessionFolders>({ folders: [], assign: {} })
+  const [newFolderId, setNewFolderId] = useState<string | null>(null)
+  useEffect(() => { fetch('/api/session-folders').then(r => r.json()).then(d => { sfRef.current = d; setSf(d) }).catch(() => {}) }, [])
+  // Changes build on the latest state (not a render's stale copy) and save in order
+  const sfRef = useRef(sf)
+  const saving = useRef(Promise.resolve())
+  function saveFolders(change: (cur: SessionFolders) => SessionFolders) {
+    const next = change(sfRef.current)
+    sfRef.current = next
+    setSf(next)
+    saving.current = saving.current
+      .then(() => fetch('/api/session-folders', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(next) }))
+      .then(() => {}, () => {})
+  }
+  function updateFolder(id: string, patch: { name?: string; collapsed?: boolean }) {
+    saveFolders(cur => ({ ...cur, folders: cur.folders.map(f => (f.id === id ? { ...f, ...patch } : f)) }))
+  }
+  function deleteFolder(id: string) {
+    saveFolders(cur => ({ folders: cur.folders.filter(f => f.id !== id), assign: Object.fromEntries(Object.entries(cur.assign).filter(([, f]) => f !== id)) }))
+  }
+  // folderId '__new' makes a folder (named inline right away) and puts the session in it
+  function moveToFolder(sessionId: string | null, folderId: string | null) {
+    const created = folderId === '__new' ? crypto.randomUUID() : null
+    if (created) { folderId = created; setNewFolderId(created) }
+    saveFolders(cur => {
+      const assign = { ...cur.assign }
+      if (sessionId) { if (folderId) assign[sessionId] = folderId; else delete assign[sessionId] }
+      return { folders: created ? [...cur.folders, { id: created, name: 'New folder' }] : cur.folders, assign }
+    })
+  }
   // Last time each session was opened (ms epoch), for the "Last used" sort.
   const [lastActive, setLastActive] = useLocalStorage<Record<string, number>>('claude-live-last-active', {})
   const lastActiveRef = useRef(lastActive)
@@ -749,6 +797,58 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
     current.splice(targetIdx, 0, draggedId)
     setLiveOrder(current)
   }
+
+  const folderOf = (id: string): string | null => {
+    const f = sf.assign[id]
+    return f && sf.folders.some(x => x.id === f) ? f : null
+  }
+
+  const renderLive = (s: LiveSessionInfo) => (
+                  <div
+                    key={s.id}
+                    draggable
+                    onDragStart={e => {
+                      e.dataTransfer.setData('text/live-session-id', s.id)
+                      e.dataTransfer.effectAllowed = 'move'
+                    }}
+                    onDragOver={e => { e.preventDefault(); setDragOverLiveId(s.id) }}
+                    onDragLeave={() => setDragOverLiveId(prev => (prev === s.id ? null : prev))}
+                    onDrop={e => {
+                      e.preventDefault()
+                      setDragOverLiveId(null)
+                      const draggedId = e.dataTransfer.getData('text/live-session-id')
+                      if (draggedId) { moveLiveSession(draggedId, s.id); if (folderOf(draggedId) !== folderOf(s.id)) moveToFolder(draggedId, folderOf(s.id)) }
+                    }}
+                    className={`cursor-grab active:cursor-grabbing rounded-lg transition-colors ${
+                      dragOverLiveId === s.id ? 'ring-2 ring-blue-600' : ''
+                    }`}
+                  >
+                    <LiveSessionCard
+                      s={s}
+                      isActive={activeSessionId === s.id}
+                      sessionNames={sessionNames}
+                      historySessions={historySessions}
+                      cost={s.claudeSessionId ? usage?.sessions[s.claudeSessionId]?.costUSD : undefined}
+                      contextTokens={s.claudeSessionId ? usage?.sessions[s.claudeSessionId]?.contextTokens : undefined}
+                      onCompact={onCompact}
+                      pipeline={[...pipelines].reverse().find(p => p.liveId === s.id) ?? null}
+                      onAutomate={onAutomate}
+                      onSetRemote={onSetRemote}
+                      onAttachLive={onAttachLive}
+                      onKillLive={onKillLive}
+                      onRemoveWorktree={onRemoveWorktree}
+                      onReview={onReview}
+                      onDeleteLive={onDeleteLive}
+                      onResume={onResumeLive}
+                      onRename={renameSession}
+                      onRenameLive={onRenameLive}
+                      compactAt={compactAt}
+                      folders={sf.folders}
+                      folderId={folderOf(s.id)}
+                      onMoveToFolder={moveToFolder}
+                    />
+                  </div>
+  )
 
   function togglePinPr(prUrl: string) {
     setPinnedPrs({ ...pinnedPrs, [prUrl]: !pinnedPrs[prUrl] })
@@ -1049,8 +1149,13 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
       {/* Live tab */}
       {tab === 'live' && (
         <div className="flex-1 overflow-y-auto px-3 py-3">
-          {orgLive.length > 1 && (
+          {orgLive.length > 0 && (
             <div className="flex items-center justify-end gap-1 mb-2 text-[11px]">
+              <button
+                onClick={() => moveToFolder(null, '__new')}
+                className="mr-auto text-gray-500 hover:text-gray-200"
+                title="Make a folder, then drag sessions into it"
+              >＋ New folder</button>
               <span className="text-gray-600 mr-0.5">Sort:</span>
               <button
                 onClick={() => setLiveSort('custom')}
@@ -1077,52 +1182,63 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
               className="w-full mb-2 bg-gray-800 hover:bg-gray-700 text-blue-400 rounded-lg px-3 py-1.5 text-xs font-medium"
             >⟳ Resume all ({orgLive.filter(s => s.status === 'idle' && s.claudeSessionId).length} idle)</button>
           )}
-          {orderedLive.length === 0
+          {orderedLive.length === 0 && sf.folders.length === 0
             ? <p className="text-xs text-gray-600 text-center mt-8">No active sessions</p>
             : <div className="flex flex-col gap-1.5">
-                {orderedLive.map(s => (
+                {sf.folders.map(f => {
+                  const items = orderedLive.filter(s => folderOf(s.id) === f.id)
+                  if (search && !items.length) return null
+                  const open = !f.collapsed || !!search
+                  const waiting = items.filter(s => s.status === 'waiting').length
+                  return (
+                    <div key={f.id}>
+                      <div
+                        onClick={() => updateFolder(f.id, { collapsed: !f.collapsed })}
+                        onDragOver={e => { e.preventDefault(); setDragOverGroup(f.id) }}
+                        onDragLeave={() => setDragOverGroup(prev => (prev === f.id ? null : prev))}
+                        onDrop={e => {
+                          e.preventDefault()
+                          setDragOverGroup(null)
+                          const id = e.dataTransfer.getData('text/live-session-id')
+                          if (id) moveToFolder(id, f.id)
+                        }}
+                        title="Click to open or close. Double-click the name to rename. Drag sessions here."
+                        className={`group/folder flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-gray-400 hover:bg-gray-800/60 transition-colors ${dragOverGroup === f.id ? 'ring-2 ring-blue-600 bg-blue-950/30' : ''}`}
+                      >
+                        <span className={`text-[9px] text-gray-600 transition-transform ${open ? 'rotate-90' : ''}`}>▶</span>
+                        <FolderIcon open={open} />
+                        <InlineEdit
+                          value={f.name}
+                          onSave={name => updateFolder(f.id, { name })}
+                          forceEdit={newFolderId === f.id}
+                          onEditDone={() => setNewFolderId(null)}
+                          className="text-xs font-semibold flex-1 truncate"
+                        />
+                        {waiting > 0 && <span className="text-[10px] text-amber-400" title={`${waiting} waiting for you`}>● {waiting}</span>}
+                        <span className="text-[11px] text-gray-600">{items.length}</span>
+                        <button
+                          onClick={e => { e.stopPropagation(); deleteFolder(f.id) }}
+                          className="opacity-0 group-hover/folder:opacity-100 text-gray-600 hover:text-red-400 text-xs"
+                          title="Delete this folder. Its sessions go back to the main list; nothing is stopped."
+                        >✕</button>
+                      </div>
+                      {open && (
+                        <div className="flex flex-col gap-1.5 mt-1.5 ml-2 pl-2 border-l border-gray-800">
+                          {items.length ? items.map(renderLive) : <p className="text-[11px] text-gray-600 px-1 py-1">Drag sessions here, or use Folder on a session.</p>}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {sf.folders.length > 0 && orderedLive.some(s => !folderOf(s.id)) && (
                   <div
-                    key={s.id}
-                    draggable
-                    onDragStart={e => {
-                      e.dataTransfer.setData('text/live-session-id', s.id)
-                      e.dataTransfer.effectAllowed = 'move'
-                    }}
-                    onDragOver={e => { e.preventDefault(); setDragOverLiveId(s.id) }}
-                    onDragLeave={() => setDragOverLiveId(prev => (prev === s.id ? null : prev))}
-                    onDrop={e => {
-                      e.preventDefault()
-                      setDragOverLiveId(null)
-                      const draggedId = e.dataTransfer.getData('text/live-session-id')
-                      if (draggedId) moveLiveSession(draggedId, s.id)
-                    }}
-                    className={`cursor-grab active:cursor-grabbing rounded-lg transition-colors ${
-                      dragOverLiveId === s.id ? 'ring-2 ring-blue-600' : ''
-                    }`}
-                  >
-                    <LiveSessionCard
-                      s={s}
-                      isActive={activeSessionId === s.id}
-                      sessionNames={sessionNames}
-                      historySessions={historySessions}
-                      cost={s.claudeSessionId ? usage?.sessions[s.claudeSessionId]?.costUSD : undefined}
-                      contextTokens={s.claudeSessionId ? usage?.sessions[s.claudeSessionId]?.contextTokens : undefined}
-                      onCompact={onCompact}
-                      pipeline={[...pipelines].reverse().find(p => p.liveId === s.id) ?? null}
-                      onAutomate={onAutomate}
-                      onSetRemote={onSetRemote}
-                      onAttachLive={onAttachLive}
-                      onKillLive={onKillLive}
-                      onRemoveWorktree={onRemoveWorktree}
-                      onReview={onReview}
-                      onDeleteLive={onDeleteLive}
-                      onResume={onResumeLive}
-                      onRename={renameSession}
-                      onRenameLive={onRenameLive}
-                      compactAt={compactAt}
-                    />
-                  </div>
-                ))}
+                    onDragOver={e => { e.preventDefault(); setDragOverGroup('') }}
+                    onDragLeave={() => setDragOverGroup(null)}
+                    onDrop={e => { e.preventDefault(); setDragOverGroup(null); const id = e.dataTransfer.getData('text/live-session-id'); if (id) moveToFolder(id, null) }}
+                    className={`mt-1 px-2 py-1 text-[11px] uppercase tracking-wide text-gray-600 rounded ${dragOverGroup === '' ? 'ring-2 ring-blue-600' : ''}`}
+                  >Not in a folder</div>
+                )}
+                {orderedLive.filter(s => !folderOf(s.id)).map(renderLive)}
               </div>
           }
         </div>
