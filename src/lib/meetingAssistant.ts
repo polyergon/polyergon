@@ -1,6 +1,7 @@
 import { spawn } from 'child_process'
 import type { MeetingNotes } from './meetingStore'
 import { claudeAuthEnv } from './claudeAuth'
+import { localeEnv } from './localeEnv'
 
 const CALL_TIMEOUT_MS = 180_000
 
@@ -17,10 +18,11 @@ export function runClaude(prompt: string, opts: AssistantSpawnOpts & { resumeId?
     ]
     const env = {
       ...Object.fromEntries(
-        ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL']
+        ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM']
           .filter(k => process.env[k])
           .map(k => [k, process.env[k]!])
       ),
+      ...localeEnv(),
       ...claudeAuthEnv(),
       ...(opts.configDir ? { CLAUDE_CONFIG_DIR: opts.configDir } : {}),
       ...opts.extraEnv,

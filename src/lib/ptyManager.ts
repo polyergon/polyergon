@@ -11,6 +11,7 @@ import { extractPrUrl } from './prDetector'
 import { getBackend, type BackendSpec } from './backends'
 import { autoCompactEnv, getSettings } from './settingsStore'
 import { claudeAuthEnv } from './claudeAuth'
+import { localeEnv } from './localeEnv'
 
 const UUID_JSONL = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.jsonl$/i
 
@@ -186,10 +187,11 @@ export function spawnSession(id: string, cwd: string, resumeId?: string, configD
     cwd,
     env: {
       ...Object.fromEntries(
-        ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'LANG', 'LC_ALL', 'ANTHROPIC_API_KEY']
+        ['PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM', 'ANTHROPIC_API_KEY']
           .filter(k => process.env[k])
           .map(k => [k, process.env[k]!])
       ),
+      ...localeEnv(),
       ...backend.env(effectiveModel),
       // Native auto-compact threshold (Settings ⚙). Claude-only env; read per spawn.
       ...(backend.id === 'claude' ? { ...autoCompactEnv(), ...claudeAuthEnv() } : {}),
