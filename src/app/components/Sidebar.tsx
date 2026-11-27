@@ -716,10 +716,14 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
   function moveToFolder(sessionId: string | null, folderId: string | null) {
     const created = folderId === '__new' ? crypto.randomUUID() : null
     if (created) { folderId = created; setNewFolderId(created) }
+    const sOrg = sessionId ? (liveSessions.find(s => s.id === sessionId)?.orgId ?? 'default') : undefined
+    const orgId = sOrg ?? (activeOrgId === 'all' ? undefined : activeOrgId)
     saveFolders(cur => {
       const assign = { ...cur.assign }
       if (sessionId) { if (folderId) assign[sessionId] = folderId; else delete assign[sessionId] }
-      return { folders: created ? [...cur.folders, { id: created, name: 'New folder' }] : cur.folders, assign }
+      const folders = created ? [...cur.folders, { id: created, name: 'New folder', ...(orgId ? { orgId } : {}) }]
+        : cur.folders.map(f => (f.id === folderId && !f.orgId && orgId ? { ...f, orgId } : f))
+      return { folders, assign }
     })
   }
   // Last time each session was opened (ms epoch), for the "Last used" sort.
@@ -802,6 +806,14 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
     const f = sf.assign[id]
     return f && sf.folders.some(x => x.id === f) ? f : null
   }
+  // A folder belongs to one org. Older folders have no orgId: they take the org of a session in them.
+  const folderOrg = (f: SessionFolders['folders'][number]): string | null => {
+    if (f.orgId) return f.orgId
+    const s = liveSessions.find(x => sf.assign[x.id] === f.id)
+    return s ? (s.orgId ?? 'default') : null
+  }
+  const orgFolders = sf.folders.filter(f => activeOrgId === 'all' || folderOrg(f) === activeOrgId)
+  const foldersFor = (s: LiveSessionInfo) => sf.folders.filter(f => { const o = folderOrg(f); return !o || o === (s.orgId ?? 'default') })
 
   const renderLive = (s: LiveSessionInfo) => (
                   <div
@@ -843,7 +855,7 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
                       onRename={renameSession}
                       onRenameLive={onRenameLive}
                       compactAt={compactAt}
-                      folders={sf.folders}
+                      folders={foldersFor(s)}
                       folderId={folderOf(s.id)}
                       onMoveToFolder={moveToFolder}
                     />
@@ -1182,10 +1194,10 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
               className="w-full mb-2 bg-gray-800 hover:bg-gray-700 text-blue-400 rounded-lg px-3 py-1.5 text-xs font-medium"
             >⟳ Resume all ({orgLive.filter(s => s.status === 'idle' && s.claudeSessionId).length} idle)</button>
           )}
-          {orderedLive.length === 0 && sf.folders.length === 0
+          {orderedLive.length === 0 && orgFolders.length === 0
             ? <p className="text-xs text-gray-600 text-center mt-8">No active sessions</p>
             : <div className="flex flex-col gap-1.5">
-                {sf.folders.map(f => {
+                {orgFolders.map(f => {
                   const items = orderedLive.filter(s => folderOf(s.id) === f.id)
                   if (search && !items.length) return null
                   const open = !f.collapsed || !!search
@@ -1230,7 +1242,7 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
                     </div>
                   )
                 })}
-                {sf.folders.length > 0 && orderedLive.some(s => !folderOf(s.id)) && (
+                {orgFolders.length > 0 && orderedLive.some(s => !folderOf(s.id)) && (
                   <div
                     onDragOver={e => { e.preventDefault(); setDragOverGroup('') }}
                     onDragLeave={() => setDragOverGroup(null)}
