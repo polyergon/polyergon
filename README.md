@@ -10,7 +10,7 @@ Polyergon is a local app for people who run many Claude Code (or GitHub Copilot 
 
 [polyergon.ai](https://polyergon.ai) · [npm](https://www.npmjs.com/package/polyergon)
 
-![Polyergon: every session in the sidebar with its status (thinking, waiting for input, idle), and the selected session's terminal](site/img/sessions.jpg)
+![Polyergon: every session in the sidebar with its status (thinking, waiting for input, idle), grouped into folders, and the selected session's terminal](site/img/sessions.jpg)
 
 ![Task board demo: a task is started, a session works on it, it waits for your review, its PR goes through CI and review, and it lands in Ready to merge](site/img/demo.gif)
 

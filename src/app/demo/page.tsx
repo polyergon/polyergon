@@ -121,6 +121,10 @@ function stubFetch() {
   const json = (d: unknown) => Promise.resolve(new Response(JSON.stringify(d), { headers: { 'Content-Type': 'application/json' } }))
   window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input instanceof Request ? input.url : input)
+    if (url.includes('/api/session-folders')) return json(init?.method === 'PUT' ? {} : {
+      folders: [{ id: 'f1', name: 'Payments' }, { id: 'f2', name: 'Docs & web' }],
+      assign: { s1: 'f1', s2: 'f1', s3: 'f2', s4: 'f2' },
+    })
     if (url.includes('/api/session-names')) return json({ names: Object.fromEntries(DEMO_SESSIONS.map(([id, n]) => [id, n])) })
     if (url.includes('/api/settings')) return json({ autoCompact: { enabled: true, windowTokens: 300000 }, notifications: { enabled: true } })
     if (url.includes('/api/backends')) return json({ backends: [{ id: 'claude', label: 'Claude' }, { id: 'copilot', label: 'Copilot' }] })
