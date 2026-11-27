@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.19
+
+- **Folders on the Live tab:** click **＋ New folder**, then drag sessions onto it or pick one from a card's **📁 Folder…** menu. Click a folder to open or close it, double-click to rename, **✕** to delete (its sessions go back to the list). Each folder shows how many sessions are waiting for you.
+- **Faster server:** fixed multi-second stalls with many sessions, and PR statuses load in one batched request.
+- **Meetings:** the Azure endpoint field accepts the full transcription URL as well as the resource URL.
+- **Copy and paste in sessions:** non-English text and special characters no longer turn into garbled symbols when the app runs as a background service.
+
 ## 0.1.18
 
 - **Fork from here:** hover a Claude reply in Chat view and click **⑂ Fork from here** to start a new session with the conversation up to that reply. The original stays as it was.
