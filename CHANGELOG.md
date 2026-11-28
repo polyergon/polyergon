@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.20
+
+- **Folders are per org:** each org shows only its own folders; **All** shows every folder. Existing folders take the org of the sessions in them.
+- **Start a session in a folder:** hover a folder and click **＋**.
+- **Ship it is simpler:** choose **Recommended**, **Hands-off** or **Ask me** in one click (the per-step switches are under **Customize steps**). Before you start, **What will happen** lists each step with your settings.
+- **Meetings say when nothing is transcribed:** a warning shows when transcription isn't set up, or after a minute of silence (mic volume too low, or a browser call's sound not reaching the recording). It clears when text comes in again.
+
 ## 0.1.19
 
 - **Folders on the Live tab:** click **＋ New folder**, then drag sessions onto it or pick one from a card's **📁 Folder…** menu. Click a folder to open or close it, double-click to rename, **✕** to delete (its sessions go back to the list). Each folder shows how many sessions are waiting for you.
