@@ -726,6 +726,19 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
       return { folders, assign }
     })
   }
+  // ＋ on a folder: the next session that appears goes into that folder.
+  // ponytail: "next new session" heuristic, 2 min window; pass a folder id through create if sessions start in bursts
+  const pendingFolder = useRef<{ id: string; at: number } | null>(null)
+  const seenLive = useRef<Set<string> | null>(null)
+  useEffect(() => {
+    const prev = seenLive.current
+    seenLive.current = new Set(liveSessions.map(s => s.id))
+    const p = pendingFolder.current
+    if (!prev || !p) return
+    if (Date.now() - p.at > 120_000) { pendingFolder.current = null; return }
+    const added = liveSessions.find(s => !prev.has(s.id))
+    if (added) { pendingFolder.current = null; moveToFolder(added.id, p.id) }
+  }, [liveSessions]) // eslint-disable-line react-hooks/exhaustive-deps
   // Last time each session was opened (ms epoch), for the "Last used" sort.
   const [lastActive, setLastActive] = useLocalStorage<Record<string, number>>('claude-live-last-active', {})
   const lastActiveRef = useRef(lastActive)
@@ -1229,6 +1242,11 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
                         {waiting > 0 && <span className="text-[10px] text-amber-400" title={`${waiting} waiting for you`}>● {waiting}</span>}
                         <span className="text-[11px] text-gray-600">{items.length}</span>
                         <button
+                          onClick={e => { e.stopPropagation(); pendingFolder.current = { id: f.id, at: Date.now() }; onNewSession() }}
+                          className="opacity-0 group-hover/folder:opacity-100 text-gray-500 hover:text-blue-400 text-sm leading-none"
+                          title="New session in this folder"
+                        >＋</button>
+                        <button
                           onClick={e => { e.stopPropagation(); deleteFolder(f.id) }}
                           className="opacity-0 group-hover/folder:opacity-100 text-gray-600 hover:text-red-400 text-xs"
                           title="Delete this folder. Its sessions go back to the main list; nothing is stopped."
@@ -1236,7 +1254,7 @@ export function Sidebar({ liveSessions, orgs, activeOrgId, onSwitchOrg, historyS
                       </div>
                       {open && (
                         <div className="flex flex-col gap-1.5 mt-1.5 ml-2 pl-2 border-l border-gray-800">
-                          {items.length ? items.map(renderLive) : <p className="text-[11px] text-gray-600 px-1 py-1">Drag sessions here, or use Folder on a session.</p>}
+                          {items.length ? items.map(renderLive) : <p className="text-[11px] text-gray-600 px-1 py-1">Drag sessions here, use Folder on a session, or ＋ to start one here.</p>}
                         </div>
                       )}
                     </div>
