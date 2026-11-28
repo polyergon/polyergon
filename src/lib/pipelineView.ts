@@ -2,6 +2,29 @@
 export interface AutoSteps { openPr: boolean; review: boolean; ci: boolean; ready: boolean; merge: boolean; postMerge: boolean }
 export const DEFAULT_AUTO: AutoSteps = { openPr: true, review: true, ci: true, ready: true, merge: false, postMerge: true }
 // Which step a suggestion belongs to
+// One-click step settings. Post-merge checks have their own on/off, so presets leave them alone.
+type MainSteps = Omit<AutoSteps, 'postMerge'>
+export const AUTO_PRESETS: { id: string; label: string; hint: string; steps: MainSteps }[] = [
+  { id: 'recommended', label: 'Recommended', hint: 'Does the work, asks you before merging', steps: { openPr: true, review: true, ci: true, ready: true, merge: false } },
+  { id: 'hands-off', label: 'Hands-off', hint: 'Also merges once approved and green', steps: { openPr: true, review: true, ci: true, ready: true, merge: true } },
+  { id: 'ask', label: 'Ask me', hint: 'Suggests each step; you click to send it', steps: { openPr: false, review: false, ci: false, ready: false, merge: false } },
+]
+export const presetOf = (a: AutoSteps): string | null =>
+  AUTO_PRESETS.find(p => (Object.keys(p.steps) as (keyof MainSteps)[]).every(k => p.steps[k] === a[k]))?.id ?? null
+
+// What Ship it will do with these settings, in order, in plain words (shown before it starts).
+export function shipPlan(a: AutoSteps, o: { channel: string | null; maxRounds: number; postMerge: boolean }): string[] {
+  const how = (on: boolean, auto: string, ask: string) => (on ? auto : ask)
+  return [
+    how(a.openPr, 'When the session has code ready, it opens a PR.', 'When the session has code ready, you get a suggestion to open a PR.'),
+    o.channel ? `Each PR is posted to #${o.channel} for review.` : 'No Slack post (no channel set). Reviewers come from GitHub.',
+    how(a.review, `Review comments get fixed automatically, up to ${o.maxRounds} rounds.`, 'On review comments, you get a suggested fix to send.'),
+    how(a.ci, `Failing CI gets fixed automatically, up to ${o.maxRounds} rounds.`, 'On failing CI, you get a suggested fix to send.'),
+    how(a.ready, 'A draft PR is marked ready once CI is green.', 'A draft PR waits for you to mark it ready.'),
+    how(a.merge, 'Once approved and green, it merges.', 'Once approved and green, it asks you before merging.'),
+    ...(o.postMerge ? [how(a.postMerge, 'After the merge, it checks CI on main, the deploy and logs.', 'After the merge, you get a suggestion to run the checks.')] : []),
+  ]
+}
 export const stepOf = (kind: 'open-pr' | 'review' | 'ci' | 'ready' | 'merge' | 'post-merge'): keyof AutoSteps => kind === 'open-pr' ? 'openPr' : kind === 'post-merge' ? 'postMerge' : kind
 
 // Browser-safe helpers for showing automations (no Node imports here).

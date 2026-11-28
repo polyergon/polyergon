@@ -1,18 +1,39 @@
 'use client'
 import { useState } from 'react'
 import type { Pipeline, PipelineConfig, PrTrack, Suggestion } from '@/lib/pipelines'
-import { DEFAULT_AUTO, stepOf, type AutoSteps } from '@/lib/pipelineView'
+import { DEFAULT_AUTO, stepOf, type AutoSteps, AUTO_PRESETS, presetOf, shipPlan } from '@/lib/pipelineView'
 import type { SlackChannel } from '@/lib/slackBridge'
 import { isRunning, pipelineSummary, shortPr, prSteps, preprSteps } from '@/lib/pipelineView'
 import { SlackChannelPicker } from './SlackChannelPicker'
 
-const STEPS = [
-  'When the session has code ready to ship, suggest opening a PR',
-  'For every PR the session opens: post "ready for review" with the link to your Slack channel',
-  'Track reviewers (GitHub and Slack) and CI for each PR',
-  'When reviewers leave feedback or CI fails, notify you with a suggested message for the session',
-  'When a PR is approved and CI is green, notify you. You merge.',
-]
+// Pick a preset in one click; the per-step switches (children) sit under "Customize".
+export function AutoPresets({ auto, onPick, children }: { auto: AutoSteps; onPick: (steps: Partial<AutoSteps>) => void; children: React.ReactNode }) {
+  const cur = presetOf(auto)
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <div className="flex rounded-lg border border-gray-700 overflow-hidden text-xs">
+        {AUTO_PRESETS.map(p => (
+          <button key={p.id} type="button" onClick={() => onPick(p.steps)} title={p.hint}
+            className={`flex-1 px-2 py-1.5 ${cur === p.id ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>{p.label}</button>
+        ))}
+      </div>
+      <p className="text-[11px] text-gray-500 mt-1.5">{cur ? AUTO_PRESETS.find(p => p.id === cur)!.hint : 'Custom: your own mix of steps.'}</p>
+      <button type="button" onClick={() => setOpen(o => !o)} className="text-[11px] text-blue-400 hover:text-blue-300 mt-1">{open || !cur ? '▾' : '▸'} Customize steps</button>
+      {(open || !cur) && <div className="mt-2">{children}</div>}
+    </div>
+  )
+}
+
+// "What will happen", in order, before you start.
+export function ShipPlan({ lines }: { lines: string[] }) {
+  return (
+    <div>
+      <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-1.5">What will happen</p>
+      <ol className="text-xs text-gray-300 space-y-1 list-decimal pl-4">{lines.map(l => <li key={l}>{l}</li>)}</ol>
+    </div>
+  )
+}
 
 // A proposed message for the session. Only your click sends it.
 export function SuggestionBox({ s, onSend, onDismiss }: { s: Suggestion; onSend: () => void; onDismiss: () => void }) {
@@ -132,7 +153,8 @@ export function AutomateDialog({ sessionName, pipeline, error, onStart, onStop, 
   const [maxRounds, setMaxRounds] = useState(3)
   const [autoDraft, setAutoDraft] = useState<AutoSteps>(DEFAULT_AUTO)
   const auto: AutoSteps = pipeline ? { ...DEFAULT_AUTO, ...pipeline.config.auto } : autoDraft
-  const setAuto = (k: keyof AutoSteps, on: boolean) => pipeline && isRunning(pipeline) ? onSetAuto(pipeline.id, { [k]: on }) : setAutoDraft(a => ({ ...a, [k]: on }))
+  const setSteps = (steps: Partial<AutoSteps>) => pipeline && isRunning(pipeline) ? onSetAuto(pipeline.id, steps) : setAutoDraft(a => ({ ...a, ...steps }))
+  const setAuto = (k: keyof AutoSteps, on: boolean) => setSteps({ [k]: on })
   const [prUrl, setPrUrl] = useState('')
   const running = isRunning(pipeline)
   const input = 'w-full bg-gray-800 border border-gray-700 focus:border-gray-500 rounded-md px-2.5 py-1.5 text-sm text-white outline-none placeholder-gray-500'
@@ -163,7 +185,8 @@ export function AutomateDialog({ sessionName, pipeline, error, onStart, onStop, 
         )}
 
         <div className="rounded-lg border border-gray-800 p-3 mb-4">
-          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">Steps · automatic or ask me</p>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wide mb-2">How much should it do on its own?</p>
+          <AutoPresets auto={auto} onPick={setSteps}>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
             {AUTO_ROWS.filter(([k]) => k !== 'postMerge').map(([k, label, hint]) => (
               <label key={k} className="flex items-center justify-between gap-2 text-xs" title={hint}>
@@ -175,6 +198,7 @@ export function AutomateDialog({ sessionName, pipeline, error, onStart, onStop, 
               </label>
             ))}
           </div>
+          </AutoPresets>
           <p className="text-[11px] text-gray-500 mt-2">Review and CI fixes stop after {pipeline?.config.maxRounds ?? maxRounds} rounds per PR, then ask you. Approving is always up to your reviewers.</p>
         </div>
 
@@ -198,9 +222,7 @@ export function AutomateDialog({ sessionName, pipeline, error, onStart, onStop, 
 
         {!running && (
           <>
-            <ol className="text-xs text-gray-300 space-y-1.5 mb-4 list-decimal pl-4">
-              {STEPS.map(s => <li key={s}>{s}</li>)}
-            </ol>
+            <div className="mb-4"><ShipPlan lines={shipPlan(auto, { channel: (channel?.name ?? channelText).replace(/^#/, '').trim() || null, maxRounds, postMerge: false })} /></div>
             <label className="block text-xs text-gray-400 mb-1">Slack channel for &quot;ready for review&quot; (optional)</label>
             <SlackChannelPicker value={channelText} onChange={(v, c) => { setChannelText(v); setChannel(c) }} className={input} />
             <p className="text-[11px] text-gray-500 mt-3">Automatic steps send their message to the session when it&apos;s idle. &quot;Ask me&quot; steps notify you and wait for your click. It posts to Slack on its own if you set a channel.</p>

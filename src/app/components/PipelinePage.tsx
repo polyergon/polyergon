@@ -3,9 +3,9 @@ import { SlackPeoplePicker } from './SlackPeoplePicker'
 import { useEffect, useState } from 'react'
 import type { Pipeline, PipelineConfig, PrTrack, PrReview } from '@/lib/pipelines'
 import type { SlackChannel } from '@/lib/slackBridge'
-import { DEFAULT_AUTO, stepOf, type AutoSteps, isRunning, pipelineSummary, shortPr, prSteps, preprSteps } from '@/lib/pipelineView'
+import { DEFAULT_AUTO, shipPlan, stepOf, type AutoSteps, isRunning, pipelineSummary, shortPr, prSteps, preprSteps } from '@/lib/pipelineView'
 import { SlackChannelPicker } from './SlackChannelPicker'
-import { SuggestionBox, TRACK_BADGE, AUTO_ROWS } from './AutomateDialog'
+import { SuggestionBox, TRACK_BADGE, AUTO_ROWS, AutoPresets, ShipPlan } from './AutomateDialog'
 
 type Step = { label: string; done: boolean; current: boolean }
 
@@ -262,7 +262,8 @@ export function PipelinePage({ sessionName, pipeline, error, onOpenSession, onRe
   const [newReview, setNewReview] = useState<PrReview | null>(null)
   const running = isRunning(pipeline)
   const auto: AutoSteps = running && pipeline ? { ...DEFAULT_AUTO, ...pipeline.config.auto } : autoDraft
-  const setAuto = (k: keyof AutoSteps, on: boolean) => running && pipeline ? onSetAuto(pipeline.id, { [k]: on }) : setAutoDraft(a => ({ ...a, [k]: on }))
+  const setSteps = (steps: Partial<AutoSteps>) => running && pipeline ? onSetAuto(pipeline.id, steps) : setAutoDraft(a => ({ ...a, ...steps }))
+  const setAuto = (k: keyof AutoSteps, on: boolean) => setSteps({ [k]: on })
   const pm = running && pipeline ? { on: !!pipeline.config.postMergeOn, checks: pipeline.config.postMergeChecks ?? '' } : pmDraft
   const setPm = (on: boolean, checks = pm.checks) => running && pipeline ? onSetPostMerge(pipeline.id, on, checks) : setPmDraft({ on, checks })
   const [pmText, setPmText] = useState<string | null>(null) // editing the checks box
@@ -270,6 +271,35 @@ export function PipelinePage({ sessionName, pipeline, error, onOpenSession, onRe
   const savePm = () => { if (pmText !== null && pmText !== pm.checks) { setPm(true, pmText); setPmSaved(true); setTimeout(() => setPmSaved(false), 2500) } setPmText(null) }
   const [phaseLabel, phaseCls] = pipeline ? PHASE[pipeline.phase] : ['Not running', 'bg-gray-800 text-gray-400 ring-gray-700']
   const input = 'w-full bg-gray-900 border border-gray-700 focus:border-blue-500 rounded-lg px-3 py-2 text-sm text-white outline-none placeholder-gray-500'
+
+  const stepRow = ([k, label, hint]: (typeof AUTO_ROWS)[number]) => {
+                const optional = k === 'postMerge', off = optional && !pm.on
+                return (
+                <div key={k} title={hint}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-sm ${off ? 'text-gray-500' : 'text-gray-200'}`}>{label}{optional && <span className="text-[10px] text-gray-500"> (optional)</span>}</span>
+                    <span className="flex rounded-lg border border-gray-700 overflow-hidden text-[11px] flex-shrink-0">
+                      {optional && <button onClick={() => setPm(false)} className={`px-2.5 py-1 ${off ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>Off</button>}
+                      <button onClick={() => { if (optional && !pm.on) setPm(true); setAuto(k, true) }} className={`px-2.5 py-1 ${!off && auto[k] ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>Auto</button>
+                      <button onClick={() => { if (optional && !pm.on) setPm(true); setAuto(k, false) }} className={`px-2.5 py-1 ${!off && !auto[k] ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>Ask me</button>
+                    </span>
+                  </div>
+                  {optional && pm.on && (
+                    <div className="mt-1.5">
+                      <textarea dir="auto" rows={2} value={pmText ?? pm.checks} onChange={e => setPmText(e.target.value)}
+                        placeholder="Also (optional), e.g. use the post-merge skill; check the billing-service pods in prod-us and prod-eu"
+                        className="w-full bg-gray-950 border border-gray-800 rounded-md px-2.5 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-500 placeholder-gray-600 resize-none" />
+                      <div className="flex items-center justify-end gap-2 mt-1">
+                        {pmSaved && <span className="text-[11px] text-emerald-400">✓ Saved. Used on the next merge.</span>}
+                        {pmText !== null && pmText !== pm.checks && <>
+                          <button onClick={() => setPmText(null)} className="text-[11px] px-2 py-0.5 text-gray-400 hover:text-white">Cancel</button>
+                          <button onClick={savePm} className="text-[11px] px-2.5 py-0.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white">Save</button>
+                        </>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+  )}
 
   function start() {
     const name = (channel?.name ?? channelText).replace(/^#/, '').trim()
@@ -335,6 +365,8 @@ export function PipelinePage({ sessionName, pipeline, error, onOpenSession, onRe
               <label className="block text-xs text-gray-400">Fix rounds per PR (review and CI, each)
                 <input type="number" min={1} max={10} value={maxRounds} onChange={e => setMaxRounds(Number(e.target.value))} className={`${input} w-24 mt-1`} />
               </label>
+              <ShipPlan lines={shipPlan(auto, { channel: (channel?.name ?? channelText).replace(/^#/, '').trim() || null, maxRounds, postMerge: pm.on })} />
+              <button onClick={start} className="text-sm px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 font-medium">{pipeline ? 'Start again' : 'Start pipeline'}</button>
             </div>
           )}
         </div>
@@ -342,37 +374,13 @@ export function PipelinePage({ sessionName, pipeline, error, onOpenSession, onRe
         {/* Side: steps + activity */}
         <aside className="space-y-5">
           <section className="rounded-2xl border border-gray-800 bg-gray-900/40 p-4">
-            <h2 className="text-sm font-semibold">Steps</h2>
+            <h2 className="text-sm font-semibold">How much should it do on its own?</h2>
             <p className="text-[11px] text-gray-500 mb-3">Automatic steps run when the session is idle. Approving is always up to your reviewers.</p>
             <div className="space-y-2">
-              {AUTO_ROWS.map(([k, label, hint]) => {
-                const optional = k === 'postMerge', off = optional && !pm.on
-                return (
-                <div key={k} title={hint}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`text-sm ${off ? 'text-gray-500' : 'text-gray-200'}`}>{label}{optional && <span className="text-[10px] text-gray-500"> (optional)</span>}</span>
-                    <span className="flex rounded-lg border border-gray-700 overflow-hidden text-[11px] flex-shrink-0">
-                      {optional && <button onClick={() => setPm(false)} className={`px-2.5 py-1 ${off ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>Off</button>}
-                      <button onClick={() => { if (optional && !pm.on) setPm(true); setAuto(k, true) }} className={`px-2.5 py-1 ${!off && auto[k] ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>Auto</button>
-                      <button onClick={() => { if (optional && !pm.on) setPm(true); setAuto(k, false) }} className={`px-2.5 py-1 ${!off && !auto[k] ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800'}`}>Ask me</button>
-                    </span>
-                  </div>
-                  {optional && pm.on && (
-                    <div className="mt-1.5">
-                      <textarea dir="auto" rows={2} value={pmText ?? pm.checks} onChange={e => setPmText(e.target.value)}
-                        placeholder="Also (optional), e.g. use the post-merge skill; check the billing-service pods in prod-us and prod-eu"
-                        className="w-full bg-gray-950 border border-gray-800 rounded-md px-2.5 py-1.5 text-xs text-gray-100 outline-none focus:border-blue-500 placeholder-gray-600 resize-none" />
-                      <div className="flex items-center justify-end gap-2 mt-1">
-                        {pmSaved && <span className="text-[11px] text-emerald-400">✓ Saved. Used on the next merge.</span>}
-                        {pmText !== null && pmText !== pm.checks && <>
-                          <button onClick={() => setPmText(null)} className="text-[11px] px-2 py-0.5 text-gray-400 hover:text-white">Cancel</button>
-                          <button onClick={savePm} className="text-[11px] px-2.5 py-0.5 rounded-md bg-blue-600 hover:bg-blue-500 text-white">Save</button>
-                        </>}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )})}
+              <AutoPresets auto={auto} onPick={setSteps}>
+                <div className="space-y-2">{AUTO_ROWS.filter(([k]) => k !== 'postMerge').map(stepRow)}</div>
+              </AutoPresets>
+              {AUTO_ROWS.filter(([k]) => k === 'postMerge').map(stepRow)}
             </div>
             {pipeline && <p className="text-[11px] text-gray-500 mt-3">Slack: {pipeline.config.slackChannel ? `#${pipeline.config.slackChannel.name}` : 'none'} · up to {pipeline.config.maxRounds} fix rounds per PR</p>}
           </section>

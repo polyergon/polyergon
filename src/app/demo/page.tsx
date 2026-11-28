@@ -193,7 +193,7 @@ export default function Demo() {
   return (
     <div className="fixed inset-0">
       <div className="relative w-full h-full">
-        <PipelinePage sessionName="ledger: webhook retries" pipeline={pipeline} error={null}
+        <PipelinePage sessionName="ledger: webhook retries" pipeline={new URLSearchParams(location.search).get('setup') ? null : pipeline} error={null}
           onOpenSession={noop} onStart={noop} onStop={noop} onAddPr={noop} onSetPrReview={noop} onTell={noop} onSetPostMerge={noop} onRemovePr={noop} onFindPrs={noop} onMarkReady={noop} onAct={noop} onDismiss={noop} onSetAuto={noop} />
       </div>
     </div>
