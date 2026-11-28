@@ -70,7 +70,7 @@ export function useMeetings(ws: WebSocket | null) {
           return [meeting, ...rest].sort((a, b) => b.startedAt - a.startedAt)
         })
       } else if (msg.type === 'meeting-transcript') {
-        updateLive(msg.meetingId as string, l => ({ ...l, transcript: [...l.transcript, msg.segment as TranscriptSegment] }))
+        updateLive(msg.meetingId as string, l => ({ ...l, lastError: null, transcript: [...l.transcript, msg.segment as TranscriptSegment] }))
       } else if (msg.type === 'meeting-notes') {
         updateLive(msg.meetingId as string, l => ({ ...l, notes: msg.notes as MeetingNotes }))
       } else if (msg.type === 'meeting-suggestion') {

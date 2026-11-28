@@ -1,8 +1,8 @@
 import { meetingStore, Meeting, MeetingNotes, TranscriptSegment, ContextItem, ContextKind } from './meetingStore'
 import { resolveContext } from './meetingContext'
 import { randomUUID } from 'crypto'
-import type { CaptureHandle } from './audioCapture'
-import { mkdirSync, writeFileSync } from 'fs'
+import { type CaptureHandle, wavRms, SILENCE_RMS_THRESHOLD } from './audioCapture'
+import { mkdirSync, writeFileSync, readFileSync } from 'fs'
 import { join } from 'path'
 import { transcribeChunk } from './transcriber'
 import { MeetingAssistant } from './meetingAssistant'
@@ -35,6 +35,8 @@ interface ActiveMeeting {
   assistant: MeetingAssistant
   chunkQueue: string[]
   transcribing: boolean
+  silentChunks: number // in a row; warns once at a minute
+  warnedNoConfig: boolean
   restarted: boolean
   lastAudioAt: number
   warnedNoAudio?: boolean
@@ -123,6 +125,8 @@ class MeetingManager {
       assistant,
       chunkQueue: [],
       transcribing: false,
+      silentChunks: 0,
+      warnedNoConfig: false,
       restarted: false,
       sentTranscriptChars: priorText.length,
       transcriptText: priorText,
@@ -150,7 +154,18 @@ class MeetingManager {
       const config = getTranscriptionConfig()
       while (a.chunkQueue.length > 0) {
         const filePath = a.chunkQueue.shift()!
-        if (!config) continue
+        if (!config) {
+          if (!a.warnedNoConfig) this.emit({ type: 'meeting-error', meetingId, message: 'Transcription is not set up, so nothing is transcribed. Set it up in Settings → Meetings.' })
+          a.warnedNoConfig = true
+          continue
+        }
+        try {
+          if (wavRms(readFileSync(filePath)) < SILENCE_RMS_THRESHOLD) {
+            if (++a.silentChunks === 6) this.emit({ type: 'meeting-error', meetingId, message: 'Only silence for a minute. Check the mic input volume (System Settings → Sound → Input). To capture people in a browser call, route the sound through BlackHole.' })
+            continue
+          }
+          a.silentChunks = 0
+        } catch {}
         try {
           // Last ~200 chars of transcript as context for language consistency
           const text = await transcribeChunk(filePath, config, a.transcriptText.slice(-200))
